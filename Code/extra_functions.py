@@ -113,9 +113,9 @@ def generate_mask(image_id, height, width, start, num_mask_channels, train=train
 
     mask = np.zeros((num_mask_channels, height, width))
 
-    for mask_channel in range(start, start + num_mask_channels):
+    for mask_channel in range(num_mask_channels):
         poly = train.loc[(train['ImageId'] == image_id)
-                         & (train['ClassType'] == mask_channel + 1), 'MultipolygonWKT'].values[0]
+                         & (train['ClassType'] == mask_channel + start + 1), 'MultipolygonWKT'].values[0]
         polygons = shapely.wkt.loads(poly)
         mask[mask_channel, :, :] = polygons2mask_layer(height, width, polygons, image_id)
     return mask
