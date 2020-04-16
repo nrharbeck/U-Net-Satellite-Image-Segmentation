@@ -211,12 +211,17 @@ def stretch_n(bands, lower_percent=5, higher_percent=95):
         out[:, :, i] = t
     return out.astype(np.float32)
 
-def _align_two_rasters(img1,img2):
-    p1 = img1[:, :, 0]
-    p2 = img2[:, :, 0]
+def _align_two_rasters(img1,img2, band):
+    i=0
+    if band == 'A':
+        i= 3
+    elif band == 'M':
+        i = 5
+    p1 = img1[:, :, 1]
+    p2 = img2[:, :, i]
     warp_mode = cv2.MOTION_EUCLIDEAN
     warp_matrix = np.eye(2, 3, dtype=np.float32)
-    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 1000,  1e-6)
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 1000, 1e-7)
     (cc, warp_matrix) = cv2.findTransformECC (p1, p2,warp_matrix, warp_mode, criteria, None, 1)
     img3 = cv2.warpAffine(img2, warp_matrix, (img1.shape[1], img1.shape[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
     img3[img3 == 0] = np.average(img3)
@@ -228,7 +233,6 @@ def read_image_22(image_id):
     img_m = np.transpose(tiff.imread(data_path + "/sixteen_band/{}_M.tif".format(image_id)), (1, 2, 0)) # h w c
     img_3 = np.transpose(tiff.imread(data_path + "/three_band/{}.tif".format(image_id)), (1, 2, 0))
     img_p = tiff.imread(data_path + "/sixteen_band/{}_P.tif".format(image_id)).astype(np.float32)
-
 
     height, width, _ = img_3.shape
     rescaled_M = cv2.resize(img_m, (width, height), interpolation=cv2.INTER_CUBIC)
@@ -242,9 +246,9 @@ def read_image_22(image_id):
     rescaled_P = stretch_n(rescaled_P)
     img_3 = stretch_n(img_3)
 
-    aligned_A = _align_two_rasters(img_3, stretched_A)
-    rescaled_M = _align_two_rasters(img_3, rescaled_M)
-    rescaled_P = _align_two_rasters(img_3, rescaled_P)
+    aligned_A = _align_two_rasters(img_3, stretched_A, 'A')
+    rescaled_M = _align_two_rasters(img_3, rescaled_M, 'M')
+    rescaled_P = _align_two_rasters(img_3, rescaled_P, 'P')
 
     rescaled_P = np.expand_dims(rescaled_P, 2)
 
@@ -272,7 +276,7 @@ def read_image_22(image_id):
     return result.astype(np.float32)
 
 
-def make_prediction_cropped(model, X_train, initial_size=(572, 572), final_size=(388, 388), num_channels=24, num_masks=10):
+def make_prediction_cropped(model, X_train, initial_size=(572, 572), final_size=(388, 388), num_channels=22, num_masks=2):
     shift = int((initial_size[0] - final_size[0]) / 2)
 
     height = X_train.shape[1]
