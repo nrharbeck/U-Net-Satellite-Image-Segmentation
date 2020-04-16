@@ -113,9 +113,9 @@ def generate_mask(image_id, height, width, start, num_mask_channels, train=train
 
     mask = np.zeros((num_mask_channels, height, width))
 
-    for mask_channel in range(start, start + num_mask_channels):
+    for mask_channel in range(num_mask_channels):
         poly = train.loc[(train['ImageId'] == image_id)
-                         & (train['ClassType'] == mask_channel + 1), 'MultipolygonWKT'].values[0]
+                         & (train['ClassType'] == mask_channel + start + 1), 'MultipolygonWKT'].values[0]
         polygons = shapely.wkt.loads(poly)
         mask[mask_channel, :, :] = polygons2mask_layer(height, width, polygons, image_id)
     return mask
@@ -198,18 +198,17 @@ def get_shape(image_id, band=3):
         return height, width
 
 def stretch_n(bands, lower_percent=5, higher_percent=95):
-    out = np.zeros_like(bands)
+    out = np.zeros_like(bands).astype(np.float32)
     n = bands.shape[2]
     for i in range(n):
-        a = 0  # np.min(band)
-        b = 1  # np.max(band)
+        a = 0
+        b = 1
         c = np.percentile(bands[:, :, i], lower_percent)
         d = np.percentile(bands[:, :, i], higher_percent)
         t = a + (bands[:, :, i] - c) * (b - a) / (d - c)
         t[t < a] = a
         t[t > b] = b
         out[:, :, i] = t
-
     return out.astype(np.float32)
 
 def _align_two_rasters(img1,img2):
@@ -224,15 +223,15 @@ def _align_two_rasters(img1,img2):
 
     return img3
 
-def read_image_24(image_id):
+def read_image_22(image_id):
     img_a = np.transpose(tiff.imread(data_path + "/sixteen_band/{}_A.tif".format(image_id)), (1, 2, 0))
     img_m = np.transpose(tiff.imread(data_path + "/sixteen_band/{}_M.tif".format(image_id)), (1, 2, 0)) # h w c
     img_3 = np.transpose(tiff.imread(data_path + "/three_band/{}.tif".format(image_id)), (1, 2, 0))
     img_p = tiff.imread(data_path + "/sixteen_band/{}_P.tif".format(image_id)).astype(np.float32)
 
+
     height, width, _ = img_3.shape
     rescaled_M = cv2.resize(img_m, (width, height), interpolation=cv2.INTER_CUBIC)
-
     rescaled_A = cv2.resize(img_a, (width, height), interpolation=cv2.INTER_CUBIC)
     rescaled_P = cv2.resize(img_p, (width, height), interpolation=cv2.INTER_CUBIC)
 
@@ -251,27 +250,17 @@ def read_image_24(image_id):
 
     image_r = img_3[:, :, 0]
     image_g = img_3[:, :, 1]
-    image_b = img_3[:, :, 2]
     nir = rescaled_M[:, :, 7]
     re = rescaled_M[:, :, 5]
-
-    L = 1.0
-    C1 = 6.0
-    C2 = 7.5
-    evi = (nir - image_r) / (nir + C1 * image_r - C2 * image_b + L)
-    evi = np.expand_dims(evi, 2)
 
     ndwi = (image_g - nir) / (image_g + nir)
     ndwi = np.expand_dims(ndwi, 2) # crop tree
 
-    savi = (nir - image_r) / (image_r + nir)
-    savi = np.expand_dims(savi, 2)
-
     ccci = (nir - re) / (nir + re) * (nir - image_r) / (nir + image_r)
     ccci = np.expand_dims(ccci, 2)
 
-    result = np.concatenate([aligned_A, rescaled_M, rescaled_P, ndwi, savi, evi, ccci, img_3], axis=2)
-    # A = [:8], M = [8:16], P = [16], ndwi = [17], savi = [18], evi = [19], ccci = [20], 3 = [21:]
+    result = np.concatenate([aligned_A, rescaled_M, rescaled_P, ndwi, ccci, img_3], axis=2)
+    # A = [:8], M = [8:16], P = [16], ndwi = [17], ccci = [18], 3 = [19:]
     '''
     SWIR (1195-2365 nm). This band cover different slices of the shortwave infrared. They are particularly useful for telling
     wet earth from dry earth, and for geology: rocks and soils that look similar in other bands often have strong contrasts in

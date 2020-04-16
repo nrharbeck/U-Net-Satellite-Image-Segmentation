@@ -31,13 +31,13 @@ def cache_train_vehicle():
     image_rows = train_shapes['height'].min()
     image_cols = train_shapes['width'].min()
 
-    num_channels = 24
+    num_channels = 22
 
     num_mask_channels = 2
 
     f = h5py.File(os.path.join(data_path, 'train_vehicle.h5'), 'w')
 
-    imgs = f.create_dataset('train', (num_train, num_channels, image_rows, image_cols), dtype=np.float16, compression='gzip', compression_opts=9)
+    imgs = f.create_dataset('train', (num_train, num_channels, image_rows, image_cols), dtype=np.float32, compression='gzip', compression_opts=9)
     imgs_mask = f.create_dataset('train_mask', (num_train, num_mask_channels, image_rows, image_cols), dtype=np.uint8, compression='gzip', compression_opts=9)
 
     ids = []
@@ -45,7 +45,7 @@ def cache_train_vehicle():
     i = 0
     for image_id in image_set:
         print(image_id)
-        image = extra_functions.read_image_24(image_id)
+        image = extra_functions.read_image_22(image_id)
         height, width, _ = image.shape
 
         imgs[i] = np.transpose(cv2.resize(image, (image_cols, image_rows), interpolation=cv2.INTER_CUBIC), (2, 0, 1))
