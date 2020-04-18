@@ -2,6 +2,7 @@ from __future__ import division
 
 import numpy as np
 import keras
+from keras.utils import Sequence
 from keras.layers import concatenate, Conv2D, MaxPooling2D, UpSampling2D, Cropping2D, BatchNormalization
 
 from keras import backend as K
@@ -9,16 +10,11 @@ from keras import backend as K
 import h5py
 from keras.optimizers import Nadam
 from keras.callbacks import ModelCheckpoint
-import pandas as pd
 from keras.backend import binary_crossentropy
 
 import datetime
 import os
-
 import random
-import threading
-
-from keras.models import model_from_json
 import matplotlib.pyplot as plt
 
 img_rows = 112
@@ -31,8 +27,8 @@ num_mask_channels = 2
 
 
 def jaccard_coef(y_true, y_pred):
-    intersection = K.sum(y_true * y_pred, axis=[0, -1, -2])
-    sum_ = K.sum(y_true + y_pred, axis=[0, -1, -2])
+    intersection = K.sum(y_true * y_pred, axis=[0, 1, 2])
+    sum_ = K.sum(y_true + y_pred, axis=[0, 1, 2])
 
     jac = (intersection + smooth) / (sum_ - intersection + smooth)
 
@@ -42,8 +38,8 @@ def jaccard_coef(y_true, y_pred):
 def jaccard_coef_int(y_true, y_pred):
     y_pred_pos = K.round(K.clip(y_pred, 0, 1))
 
-    intersection = K.sum(y_true * y_pred_pos, axis=[0, -1, -2])
-    sum_ = K.sum(y_true + y_pred_pos, axis=[0, -1, -2])
+    intersection = K.sum(y_true * y_pred_pos, axis=[0, 1, 2])
+    sum_ = K.sum(y_true + y_pred_pos, axis=[0, 1, 2])
 
     jac = (intersection + smooth) / (sum_ - intersection + smooth)
 
@@ -133,10 +129,9 @@ def get_unet0():
 
     return model
 
-
 def form_batch(X, y, batch_size):
     X_batch = np.zeros((batch_size, num_channels, img_rows, img_cols))
-    y_batch = np.zeros((batch_size, num_mask_channels, img_rows, img_cols))
+    y_batch = np.zeros((batch_size, num_mask_channels, img_rows-32, img_cols-32))
     X_height = X.shape[2]
     X_width = X.shape[3]
 
@@ -146,78 +141,48 @@ def form_batch(X, y, batch_size):
 
         random_image = random.randint(0, X.shape[0] - 1)
 
-        y_batch[i] = y[random_image, :, random_height: random_height + img_rows, random_width: random_width + img_cols]
-        X_batch[i] = np.array(X[random_image, :, random_height: random_height + img_rows, random_width: random_width + img_cols])
-    return X_batch, y_batch
+        X_batch[i] = X[random_image, :, random_height: random_height + img_rows, random_width: random_width + img_cols]
+        yb = y[random_image, :, random_height: random_height + img_rows, random_width: random_width + img_cols]
+        y_batch[i] = yb[:, 16:16 + img_rows - 32, 16:16 + img_cols - 32]
+    return np.transpose(X_batch, (0, 2, 3, 1)), np.transpose(y_batch, (0, 2, 3, 1))
 
-import threading
-class threadsafe_iter:
-    def __init__(self, it):
-        self.it = it
-        self.lock = threading.Lock()
-    def __iter__(self):
-        return self
-    def __next__(self):
-        with self.lock:
-            return next(self.it)
+class data_generator(Sequence):
 
-def threadsafe_generator(f):
-    def g(*a, **kw):
-        return threadsafe_iter(f(*a, **kw))
-    return g
+    def __init__(self, x_set, y_set, batch_size, horizontal_flip, vertical_flip, swap_axis):
+        self.swap_axis = swap_axis
+        self.vertical_flip = vertical_flip
+        self.horizontal_flip = horizontal_flip
+        self.x, self.y = x_set, y_set
+        self.batch_size = batch_size
 
-@threadsafe_generator
-def batch_generator(X, y, batch_size, horizontal_flip=False, vertical_flip=False, swap_axis=False):
-    while True:
-        X_batch, y_batch = form_batch(X, y, batch_size)
+    def __len__(self):
+        return int(np.ceil(len(self.x) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        X_batch, y_batch = form_batch(self.x, self.y, self.batch_size)
 
         for i in range(X_batch.shape[0]):
             xb = X_batch[i]
             yb = y_batch[i]
 
-            if horizontal_flip:
+            if self.horizontal_flip:
                 if np.random.random() < 0.5:
                     xb = np.fliplr(xb)
-                    yb = np.fliplr(xb)
+                    yb = np.fliplr(yb)
 
-            if vertical_flip:
+            if self.vertical_flip:
                 if np.random.random() < 0.5:
                     xb = np.flipud(xb)
-                    yb = np.flipud(xb)
+                    yb = np.flipud(yb)
 
-            if swap_axis:
+            if self.swap_axis:
                 if np.random.random() < 0.5:
                     xb = np.rot90(xb)
                     yb = np.rot90(yb)
 
             X_batch[i] = xb
             y_batch[i] = yb
-
-        yield X_batch, y_batch[:, :, 16:16 + img_rows - 32, 16:16 + img_cols - 32]
-
-
-def save_model(model, cross):
-    json_string = model.to_json()
-    if not os.path.isdir('cache'):
-        os.mkdir('cache')
-    json_name = 'architecture_' + cross + '.json'
-    weight_name = 'model_weights_' + cross + '.h5'
-    open(os.path.join('cache', json_name), 'w').write(json_string)
-    model.save_weights(os.path.join('cache', weight_name), overwrite=True)
-
-
-def save_history(history, suffix):
-    filename = 'history/history_' + suffix + '.csv'
-    pd.DataFrame(history.history).to_csv(filename, index=False)
-
-
-def read_model(cross=''):
-    json_name = 'architecture_' + cross + '.json'
-    weight_name = 'model_weights_' + cross + '.h5'
-    model = model_from_json(open(os.path.join(data_path + '/cache', json_name)).read())
-    model.load_weights(os.path.join(data_path + '/cache', weight_name))
-    return model
-
+        yield X_batch, y_batch
 
 if __name__ == '__main__':
     data_path = os.getcwd()
@@ -238,16 +203,17 @@ if __name__ == '__main__':
     train_ids = np.array(f['train_ids'])
 
     batch_size = 128
-    nb_epoch = 50
+    nb_epoch = 15
 
-    filepath = "b_s.hdf5"
+    filepath = "b_s.h5"
     model.compile(optimizer=Nadam(lr=1e-3), loss=jaccard_coef_loss, metrics=['binary_crossentropy', jaccard_coef_int])
-    history = model.fit_generator(batch_generator(X_train, y_train, batch_size, horizontal_flip=True, vertical_flip=True, swap_axis=True),
+    model.load_weights('b_s.h5')
+    history = model.fit_generator(generator=data_generator(X_train, y_train, batch_size, horizontal_flip=True, vertical_flip=True, swap_axis=True),
                         epochs=nb_epoch,
                         verbose=1,
                         samples_per_epoch=batch_size * 400,
-                        validation_data=batch_generator(X_train, y_train, 512),
-                        validation_steps = 1,
+                        validation_data=data_generator(X_train, y_train, 128, horizontal_flip=False, vertical_flip=False, swap_axis=False),
+                        validation_steps = 4,
                         callbacks=[ModelCheckpoint(filepath, monitor="val_loss", save_best_only=True, save_weights_only=True)],
                         workers=8
                         )
@@ -261,7 +227,7 @@ if __name__ == '__main__':
     plt.ylabel('binary_crossentropy')
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left')
-    plt.savefig('b_s_binary_crossentropy.png')
+    plt.savefig('b_s_binary_crossentropy' +str(history.history['val_jaccard_coef_int'][-1]) +'.png')
     # summarize history for loss
     plt.plot(history.history['loss'])
     plt.plot(history.history['val_loss'])
@@ -269,6 +235,6 @@ if __name__ == '__main__':
     plt.ylabel('loss')
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left')
-    plt.savefig('b_s_loss.png')
+    plt.savefig('b_s_loss' +str(history.history['val_jaccard_coef_int'][-1]) +'.png')
 
     f.close()
