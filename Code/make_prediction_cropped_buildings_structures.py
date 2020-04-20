@@ -124,13 +124,13 @@ def jaccard_coef_int(y_true, y_pred):
 def jaccard_coef_loss(y_true, y_pred):
     return -K.log(jaccard_coef(y_true, y_pred)) + binary_crossentropy(y_pred, y_true)
 
-def read_model():
+def read_model(file):
     model = get_unet0()
     model.compile(optimizer=Nadam(lr=1e-3), loss=jaccard_coef_loss, metrics=['binary_crossentropy', jaccard_coef_int])
-    model.load_weights('b_s.h5')
+    model.load_weights(file)
     return model
 
-model = read_model()
+model = read_model('b_s.h5')
 
 sample = pd.read_csv('sample_submission.csv')
 
