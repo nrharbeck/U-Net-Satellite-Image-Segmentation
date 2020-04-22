@@ -10,7 +10,7 @@ import zipfile
 import os
 with open('/root/.kaggle/kaggle.json', 'w') as file:
     json.dump(api_token, file)
-!kaggle competitions download -c dstl-satellite-imagery-feature-detection
+os.system('kaggle competitions download -c dstl-satellite-imagery-feature-detection')
 if not os.path.exists("/content/competitions/dstl-satellite-imagery-feature-detection"):
     os.makedirs("/content/competitions/dstl-satellite-imagery-feature-detection")
 os.chdir('/content/competitions/dstl-satellite-imagery-feature-detection')
