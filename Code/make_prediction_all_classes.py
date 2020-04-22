@@ -13,6 +13,9 @@ from tensorflow.keras.losses import binary_crossentropy
 import shapely.geometry
 from numba import jit
 import numpy as np
+import tifffile as tiff
+import cv2
+from shapely.geometry import MultiPolygon
 
 img_rows = 112
 img_cols = 112
@@ -21,7 +24,6 @@ smooth = 1e-12
 data_path = os.getcwd()
 num_channels = 22
 num_mask_channels = 2
-threashold = 0.3
 
 def get_unet0():
     inputs = Input((img_rows, img_cols, num_channels))
@@ -130,8 +132,6 @@ def read_model(file):
     model.load_weights(file)
     return model
 
-model = read_model('b_s.h5')
-
 sample = pd.read_csv('sample_submission.csv')
 
 three_band_path = os.path.join(data_path, 'three_band')
@@ -140,30 +140,33 @@ train_wkt = pd.read_csv(os.path.join(data_path, 'train_wkt_v4.csv'))
 gs = pd.read_csv(os.path.join(data_path, 'grid_sizes.csv'), names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
 shapes = pd.read_csv(os.path.join(data_path, '3_shapes.csv'))
 
-#test_ids = shapes.loc[~shapes['image_id'].isin(train_wkt['ImageId'].unique()), 'image_id']
-test_ids = ['6050_4_4', '6060_0_1', '6060_1_4', '6100_0_2', '6100_2_4', '6110_2_3', '6120_1_4', '6120_3_3']
+test_ids = shapes.loc[~shapes['image_id'].isin(train_wkt['ImageId'].unique()), 'image_id']
+#test_ids = ['6050_4_4', '6060_0_1', '6060_1_4', '6100_0_2', '6100_2_4', '6110_2_3', '6120_1_4', '6120_3_3']
 result = []
 
 @jit
 def mask2poly(predicted_mask, threashold, x_scaler, y_scaler):
-    polygons = extra_functions.mask2polygons_layer(predicted_mask > threashold, epsilon=0, min_area=5)
+    polygons = extra_functions.mask2polygons_layer((predicted_mask > threashold) * 1.0, epsilon=0, min_area=5)
 
     polygons = shapely.affinity.scale(polygons, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
     return shapely.wkt.dumps(polygons.buffer(2.6e-5))
+@jit
+def mask2poly_fastwater(predicted_mask, x_scaler, y_scaler):
+    polygons = extra_functions.mask2polygons_layer(predicted_mask, epsilon=0, min_area=10000)
+    polygons = shapely.affinity.scale(polygons, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
+    return shapely.wkt.dumps(polygons)
+@jit
+def mask2poly_slowwater(predicted_mask, x_scaler, y_scaler):
+    polygons = extra_functions.mask2polygons_layer(predicted_mask, epsilon=0, min_area=1000)
 
+    polygons = MultiPolygon([x for x in polygons if 270000 < x.area < 300000 or x.area < 90000])
 
-#for image_id in tqdm(test_ids[:2]):
-for image_id in test_ids:
-    print(image_id)
-    image = extra_functions.read_image_22(image_id)
+    polygons = shapely.affinity.scale(polygons, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
+    return shapely.wkt.dumps(polygons)
 
-    H = image.shape[0]
-    W = image.shape[1]
-
-    x_max, y_min = extra_functions._get_xmax_ymin(image_id)
-
+def predict_poly(model, threashold1, threashold2, result, first_class):
     predicted_mask = extra_functions.make_prediction_cropped(model, image, initial_size=(112, 112),
-                                                             final_size=(112-32, 112-32),
+                                                             final_size=(112 - 32, 112 - 32),
                                                              num_masks=num_mask_channels, num_channels=num_channels)
 
     image_v = np.flipud(image)
@@ -191,10 +194,47 @@ for image_id in test_ids:
 
     x_scaler, y_scaler = extra_functions.get_scalers(H, W, x_max, y_min)
 
-    mask_channel = 0
-    result += [(image_id, mask_channel + 1, mask2poly(new_mask[:, :, 0], threashold, x_scaler, y_scaler))]
-    mask_channel = 1
-    result += [(image_id, mask_channel + 1, mask2poly(new_mask[:, :, 1], threashold, x_scaler, y_scaler))]
+    mask_channel = first_class
+    result += [(image_id, mask_channel + 1, mask2poly(new_mask[:, :, 0], threashold1, x_scaler, y_scaler))]
+    mask_channel = first_class + 1
+    result += [(image_id, mask_channel + 1, mask2poly(new_mask[:, :, 1], threashold2, x_scaler, y_scaler))]
+    return result
+
+for image_id in tqdm(test_ids):
+#for image_id in test_ids:
+    print(image_id)
+    image = extra_functions.read_image_22(image_id)
+
+    H = image.shape[0]
+    W = image.shape[1]
+
+    x_max, y_min = extra_functions._get_xmax_ymin(image_id)
+
+    model = read_model('b_s.h5')
+    result = predict_poly(model, 0.1, 0.1, result, 0)
+    model = read_model('r_t.h5')
+    result = predict_poly(model, 0.1, 0.1, result, 2)
+    model = read_model('t_c.h5')
+    result = predict_poly(model, 0.9, 0.9, result, 4)
+    model = read_model('vehicle.h5')
+    result = predict_poly(model, 0.9, 0.05, result, 8)
+
+    CCCI = image[18]
+
+    x_scaler, y_scaler = extra_functions.get_scalers(H, W, x_max, y_min)
+
+# you can look on histogram and pick your favorite threshold value(0.11 is my best)
+    predicted_mask = (CCCI > 0.11).astype(np.float32)
+
+    if predicted_mask.sum() <= 500000:
+        result += [(image_id, 7, 'MULTIPOLYGON EMPTY')]
+    else:
+        result += [(image_id, 7, mask2poly_fastwater(predicted_mask, x_scaler, y_scaler))]
+    if predicted_mask.sum() > 680000:
+        result += [(image_id, 8, 'MULTIPOLYGON EMPTY')]
+    else:
+        result += [(image_id, 8, mask2poly_slowwater(predicted_mask, x_scaler, y_scaler))]
+
 
 submission = pd.DataFrame(result, columns=['ImageId', 'ClassType', 'MultipolygonWKT'])
 
@@ -202,4 +242,4 @@ submission = pd.DataFrame(result, columns=['ImageId', 'ClassType', 'Multipolygon
 sample = sample.drop('MultipolygonWKT', 1)
 submission = sample.merge(submission, on=['ImageId', 'ClassType'], how='left').fillna('MULTIPOLYGON EMPTY')
 
-submission.to_csv('temp_b_s.csv', index=False)
+submission.to_csv('pred_all.csv', index=False)
