@@ -117,7 +117,7 @@ def generate_mask(image_id, height, width, start, num_mask_channels, train=train
         poly = train.loc[(train['ImageId'] == image_id)
                          & (train['ClassType'] == mask_channel + start + 1), 'MultipolygonWKT'].values[0]
         polygons = shapely.wkt.loads(poly)
-        mask[mask_channel, :, :] = polygons2mask_layer(height, width, polygons, image_id)
+        mask[:, :, mask_channel] = polygons2mask_layer(height, width, polygons, image_id)
     return mask
 
 
@@ -263,7 +263,7 @@ def read_image_22(image_id):
     ccci = (nir - re) / (nir + re) * (nir - image_r) / (nir + image_r)
     ccci = np.expand_dims(ccci, 2)
 
-    result = np.concatenate([aligned_A, rescaled_M, rescaled_P, ndwi, ccci, img_3], axis=2)
+    result = np.concatenate([stretched_A, rescaled_M, rescaled_P, ndwi, ccci, img_3], axis=2)
     # A = [:8], M = [8:16], P = [16], ndwi = [17], ccci = [18], 3 = [19:]
     '''
     SWIR (1195-2365 nm). This band cover different slices of the shortwave infrared. They are particularly useful for telling
@@ -276,11 +276,11 @@ def read_image_22(image_id):
     return result.astype(np.float32)
 
 
-def make_prediction_cropped(model, X_train, initial_size=(572, 572), final_size=(388, 388), num_channels=22, num_masks=2):
+def make_prediction_cropped(model, X_train, initial_size=(112, 112), final_size=(80, 80), num_channels=22, num_masks=2):
     shift = int((initial_size[0] - final_size[0]) / 2)
 
-    height = X_train.shape[1]
-    width = X_train.shape[2]
+    height = X_train.shape[0]
+    width = X_train.shape[1]
 
     if height % final_size[1] == 0:
         num_h_tiles = int(height / final_size[1])
@@ -298,24 +298,24 @@ def make_prediction_cropped(model, X_train, initial_size=(572, 572), final_size=
     padded_height = rounded_height + 2 * shift
     padded_width = rounded_width + 2 * shift
 
-    padded = np.zeros((num_channels, padded_height, padded_width))
+    padded = np.zeros((padded_height, padded_width, num_channels))
 
-    padded[:, shift:shift + height, shift: shift + width] = X_train
+    padded[shift:shift + height, shift: shift + width] = X_train
 
     # add mirror reflections to the padded areas
-    up = padded[:, shift:2 * shift, shift:-shift][:, ::-1]
-    padded[:, :shift, shift:-shift] = up
+    up = padded[shift:2 * shift, shift:-shift][::-1]
+    padded[:shift, shift:-shift] = up
 
-    lag = padded.shape[1] - height - shift
-    bottom = padded[:, height + shift - lag:shift + height, shift:-shift][:, ::-1]
-    padded[:, height + shift:, shift:-shift] = bottom
+    lag = padded.shape[0] - height - shift
+    bottom = padded[height + shift - lag:shift + height, shift:-shift][::-1]
+    padded[height + shift:, shift:-shift] = bottom
 
-    left = padded[:, :, shift:2 * shift][:, :, ::-1]
-    padded[:, :, :shift] = left
+    left = padded[:, shift:2 * shift][:, ::-1]
+    padded[:, :shift] = left
 
-    lag = padded.shape[2] - width - shift
-    right = padded[:, :, width + shift - lag:shift + width][:, :, ::-1]
-    padded[:, :, width + shift:] = right
+    lag = padded.shape[1] - width - shift
+    right = padded[:, width + shift - lag:shift + width][:, ::-1]
+    padded[:, width + shift:] = right
 
     h_start = range(0, padded_height, final_size[0])[:-1]
     assert len(h_start) == num_h_tiles
@@ -326,15 +326,15 @@ def make_prediction_cropped(model, X_train, initial_size=(572, 572), final_size=
     temp = []
     for h in h_start:
         for w in w_start:
-            temp += [padded[:, h:h + initial_size[0], w:w + initial_size[0]]]
+            temp += [padded[h:h + initial_size[0], w:w + initial_size[0]]]
 
     prediction = model.predict(np.array(temp))
 
-    predicted_mask = np.zeros((num_masks, rounded_height, rounded_width))
+    predicted_mask = np.zeros((rounded_height, rounded_width, num_masks))
 
     for j_h, h in enumerate(h_start):
          for j_w, w in enumerate(w_start):
              i = len(w_start) * j_h + j_w
-             predicted_mask[:, h: h + final_size[0], w: w + final_size[0]] = prediction[i]
+             predicted_mask[h: h + final_size[0], w: w + final_size[0]] = prediction[i]
 
-    return predicted_mask[:, :height, :width]
+    return predicted_mask[:height, :width]
