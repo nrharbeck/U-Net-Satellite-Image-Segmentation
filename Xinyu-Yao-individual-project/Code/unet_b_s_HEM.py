@@ -130,12 +130,6 @@ def get_unet0():
 
     return model
 
-def flip_axis(x, axis):
-    x = np.asarray(x).swapaxes(axis, 0)
-    x = x[::-1, ...]
-    x = x.swapaxes(0, axis)
-    return x
-
 def form_batch(X, y, batch_size):
     X_batch = np.zeros((batch_size, num_channels, img_rows, img_cols))
     y_batch = np.zeros((batch_size, num_mask_channels, img_rows-32, img_cols-32))
