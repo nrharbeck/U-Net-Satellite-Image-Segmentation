@@ -1,0 +1,7 @@
+These folders contain the files for loading the DSTL data, training a U-Net, and obtaining results.
+
+To begin the dataset can be downloaded directly from the Kaggle competition (link here: https://www.kaggle.com/c/dstl-satellite-imagery-feature-detection/data) or via the finalproject6203_DataLoading.py file. You will need your Kaggle API key and username to run this code and have installed the Kaggle API. More details can be found here: https://www.kaggle.com/docs/api
+
+To actually start processing the data, the files in the 'data-processing' folder can be downloaded. Be sure that the files are all located within the same path because some scripts will call functions from other files downloaded. First run the get_class_image.py and get_3_band_shapes.py files. This will save some data that is used in the next set of functions. Then you can run each of the cache_train_[nickname of features].py files. This will take a little while and the saved files from this step are fairly large.
+
+After creating the .h5 files with the preprocessed data, any of the [name]UNET.py files can start training on this data. Once again be sure that the files are located within the same path and this training step will take a significant amount of time. The trained models will also be saved for each U-Net that has been run. From this point any of the Visualize_[data].py files can be run to see what the model did. Some file names may need to be modified depending on what you would like to visualize.
