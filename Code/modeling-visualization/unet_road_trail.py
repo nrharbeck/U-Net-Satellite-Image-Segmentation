@@ -193,7 +193,7 @@ if __name__ == '__main__':
     model = get_unet0()
 
     print('[{}] Reading train...'.format(str(datetime.datetime.now())))
-    f = h5py.File(os.path.join(data_path, 'train_b_s.h5'), 'r')
+    f = h5py.File(os.path.join(data_path, 'train_r_t.h5'), 'r')
 
     X_train = f['train']
 
@@ -203,15 +203,15 @@ if __name__ == '__main__':
     train_ids = np.array(f['train_ids'])
 
     batch_size = 128
-    nb_epoch = 10
+    nb_epoch = 7
 
-    filepath = "b_s.h5"
+    filepath = "r_t_forfigure.h5"
     model.compile(optimizer=Nadam(lr=1e-3), loss=jaccard_coef_loss, metrics=['binary_crossentropy', jaccard_coef_int])
-    model.load_weights('b_s.h5')
+    #model.load_weights('r_t.h5')
     history = model.fit_generator(generator=data_generator(X_train, y_train, batch_size, horizontal_flip=True, vertical_flip=True, swap_axis=True),
                         epochs=nb_epoch,
                         verbose=1,
-                        samples_per_epoch=batch_size * 400,
+                        samples_per_epoch=batch_size * 4,
                         validation_data=data_generator(X_train, y_train, 128, horizontal_flip=False, vertical_flip=False, swap_axis=False),
                         validation_steps = 4,
                         callbacks=[ModelCheckpoint(filepath, monitor="val_loss", save_best_only=True, save_weights_only=True)],
@@ -221,20 +221,19 @@ if __name__ == '__main__':
     # list all data in history
     print(history.history.keys())
     # summarize history for accuracy
-    plt.plot(history.history['binary_crossentropy'])
-    plt.plot(history.history['val_binary_crossentropy'])
-    plt.title('model binary_crossentropy')
-    plt.ylabel('binary_crossentropy')
+    plt.plot(history.history['jaccard_coef_int'])
+    plt.plot(history.history['val_jaccard_coef_int'])
+    #plt.title('model jaccard_coef_int')
     plt.xlabel('epoch')
-    plt.legend(['train', 'test'], loc='upper left')
-    plt.savefig('b_s_binary_crossentropy' +str(np.min(history.history['val_jaccard_coef_int'])) +'.png')
+    #plt.legend(['train', 'test'], loc='upper left')
+    #plt.savefig('b_s_binary_crossentropy' +str(np.min(history.history['val_jaccard_coef_int'])) +'.png')
     # summarize history for loss
     plt.plot(history.history['loss'])
     plt.plot(history.history['val_loss'])
     plt.title('model loss')
     plt.ylabel('loss')
     plt.xlabel('epoch')
-    plt.legend(['train', 'test'], loc='upper left')
-    plt.savefig('b_s_loss' +str(history.history['val_jaccard_coef_int'][-1]) +'.png')
+    plt.legend(['train_jac', 'test_jac', 'train_loss', 'test_loss'], loc='upper left')
+    plt.savefig('r_t_loss' +str(np.min(history.history['val_jaccard_coef_int'])) +'.png')
 
     f.close()

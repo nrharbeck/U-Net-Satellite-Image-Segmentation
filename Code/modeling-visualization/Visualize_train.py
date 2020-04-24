@@ -1,8 +1,3 @@
-"""
-code to visualize the .h5 files cached for training 
-"""
-
-
 import os
 import h5py
 import cv2
